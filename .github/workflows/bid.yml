@@ -1,0 +1,71 @@
+name: Actualizar BID
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 10 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Obtener licitaciones vigentes del BID
+        shell: bash
+        run: |
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+          URL="https://bidfa-admin.connectamericas.com/items/tenders?filter[status]=approved&limit=501&filter[date_close][_gte]=${NOW}"
+
+          echo "Consultando: $URL"
+
+          curl --fail \
+               --silent \
+               --show-error \
+               --location \
+               "$URL" \
+               -o latest.json
+
+          python - <<'PY'
+          import json
+
+          with open("latest.json", "r", encoding="utf-8") as f:
+              payload = json.load(f)
+
+          data = payload.get("data")
+
+          if not isinstance(data, list):
+              raise SystemExit("ERROR: la respuesta no contiene un array 'data'")
+
+          print(f"Licitaciones descargadas: {len(data)}")
+
+          if len(data) == 0:
+              raise SystemExit("ERROR: el endpoint devolvió 0 licitaciones")
+          PY
+
+      - name: Guardar copia histórica
+        shell: bash
+        run: |
+          mkdir -p archive
+          cp latest.json "archive/$(date -u +%Y-%m-%d).json"
+
+      - name: Publicar actualización
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add latest.json archive/
+
+          if git diff --cached --quiet; then
+            echo "No hay cambios para publicar."
+          else
+            git commit -m "Actualizar licitaciones BID $(date -u +%Y-%m-%d)"
+            git push
+          fi
