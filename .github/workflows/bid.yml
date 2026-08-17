@@ -1,21 +1,3 @@
-name: Actualizar BID
-
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "30 10 * * *"
-
-permissions:
-  contents: write
-
-jobs:
-  actualizar:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Descargar repositorio
-        uses: actions/checkout@v4
-
       - name: Obtener licitaciones vigentes del BID
         shell: bash
         run: |
@@ -25,7 +7,8 @@ jobs:
 
           echo "Consultando: $URL"
 
-          curl --fail \
+          curl --globoff \
+               --fail \
                --silent \
                --show-error \
                --location \
@@ -48,24 +31,3 @@ jobs:
           if len(data) == 0:
               raise SystemExit("ERROR: el endpoint devolvió 0 licitaciones")
           PY
-
-      - name: Guardar copia histórica
-        shell: bash
-        run: |
-          mkdir -p archive
-          cp latest.json "archive/$(date -u +%Y-%m-%d).json"
-
-      - name: Publicar actualización
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add latest.json archive/
-
-          if git diff --cached --quiet; then
-            echo "No hay cambios para publicar."
-          else
-            git commit -m "Actualizar licitaciones BID $(date -u +%Y-%m-%d)"
-            git push
-          fi
