@@ -1,54 +1,162 @@
-name: Actualizar BID
+```yaml
+name: Update BID tenders snapshot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "30 10 * * *"
+    - cron: "45 11 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  actualizar:
+  update:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar repositorio
+
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Obtener licitaciones vigentes del BID
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Set extraction timestamp
         run: |
-          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-          URL="https://bidfa-admin.connectamericas.com/items/tenders?filter[status]=approved&limit=501&filter[date_close][_gte]=$NOW"
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "NOW=$NOW" >> $GITHUB_ENV
+          echo "Extraction timestamp: $NOW"
 
-          echo "Consultando endpoint BID..."
+      - name: Download BID tenders
+        run: |
+          URL="https://bidfa-admin.connectamericas.com/items/tenders?filter[status]=approved&limit=501&filter[date_close][_gte]=${NOW}"
 
-          curl -g -f -sS -L "$URL" -o latest.json
+          echo "Querying BID endpoint..."
+          echo "$URL"
 
-          TOTAL=$(jq '.data | length' latest.json)
+          HTTP_STATUS=$(curl \
+            --silent \
+            --show-error \
+            --location \
+            --write-out "%{http_code}" \
+            --output latest.tmp.json \
+            "$URL")
 
-          echo "Licitaciones descargadas: $TOTAL"
+          echo "HTTP status: $HTTP_STATUS"
 
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "ERROR: el endpoint devolvió 0 licitaciones"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "BID request failed"
             exit 1
           fi
 
-      - name: Guardar copia histórica
+      - name: Validate JSON
         run: |
-          mkdir -p archive
-          cp latest.json "archive/$(date -u +%Y-%m-%d).json"
+          if ! jq empty latest.tmp.json >/dev/null 2>&1; then
+            echo "Invalid JSON"
+            exit 1
+          fi
 
-      - name: Publicar actualización
+          if ! jq -e '.data | type == "array"' latest.tmp.json >/dev/null; then
+            echo "Property .data does not exist or is not an array"
+            exit 1
+          fi
+
+      - name: Count records
+        run: |
+          TOTAL=$(jq '.data | length' latest.tmp.json)
+
+          echo "TOTAL=$TOTAL" >> $GITHUB_ENV
+          echo "BID records retrieved: $TOTAL"
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "No BID records returned"
+            exit 1
+          fi
+
+      - name: Validate coverage
+        run: |
+          LIMIT=501
+
+          echo "Requested limit: $LIMIT"
+
+          if [ "$TOTAL" -ge "$LIMIT" ]; then
+            echo "Potential truncation detected."
+            echo "Coverage complete: false"
+            exit 1
+          fi
+
+          echo "Coverage complete: true"
+
+      - name: Prepare latest.json
+        run: |
+          cp latest.tmp.json latest.json
+
+      - name: Calculate SHA256
+        run: |
+          SHA256=$(sha256sum latest.json | awk '{print $1}')
+
+          echo "SHA256=$SHA256" >> $GITHUB_ENV
+          echo "Snapshot SHA256: $SHA256"
+
+      - name: Generate metadata.json
+        run: |
+          jq -n \
+            --arg source "BID for the Americas" \
+            --arg endpoint "https://bidfa-admin.connectamericas.com/items/tenders" \
+            --arg extracted_at "$NOW" \
+            --arg status "approved" \
+            --arg date_close_gte "$NOW" \
+            --argjson total_records "$TOTAL" \
+            --argjson limit_requested 501 \
+            --argjson coverage_complete true \
+            --arg validation_status "OK" \
+            --arg sha256 "$SHA256" \
+            '{
+              source: $source,
+              endpoint: $endpoint,
+              extracted_at: $extracted_at,
+              filters: {
+                status: $status,
+                date_close_gte: $date_close_gte
+              },
+              total_records: $total_records,
+              limit_requested: $limit_requested,
+              coverage_complete: $coverage_complete,
+              validation_status: $validation_status,
+              sha256: $sha256
+            }' > metadata.json
+
+      - name: Verify published count
+        run: |
+          JSON_TOTAL=$(jq '.data | length' latest.json)
+          META_TOTAL=$(jq '.total_records' metadata.json)
+
+          echo "latest.json records: $JSON_TOTAL"
+          echo "metadata.json records: $META_TOTAL"
+
+          if [ "$JSON_TOTAL" -ne "$META_TOTAL" ]; then
+            echo "COUNT_MISMATCH"
+            exit 1
+          fi
+
+          echo "Validation status: OK"
+
+      - name: Show metadata
+        run: |
+          cat metadata.json
+
+      - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add latest.json archive/
+          git add latest.json metadata.json
 
           if git diff --cached --quiet; then
-            echo "No hay cambios para publicar."
-          else
-            git commit -m "Actualizar licitaciones BID $(date -u +%Y-%m-%d)"
-            git push
+            echo "No changes detected"
+            exit 0
           fi
+
+          git commit -m "Update BID tenders snapshot $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
+```
