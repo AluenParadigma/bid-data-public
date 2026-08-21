@@ -1,4 +1,3 @@
-```yaml
 name: Update BID tenders snapshot
 
 on:
@@ -161,4 +160,3 @@ jobs:
 
           git commit -m "Update BID tenders snapshot $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
-```
