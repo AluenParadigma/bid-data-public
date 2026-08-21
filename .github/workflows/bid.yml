@@ -1,3 +1,4 @@
+```yaml
 name: Update BID tenders snapshot
 
 on:
@@ -13,17 +14,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
 
       - name: Set extraction timestamp
         run: |
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "NOW=$NOW" >> $GITHUB_ENV
+          echo "NOW=$NOW" >> "$GITHUB_ENV"
           echo "Extraction timestamp: $NOW"
 
       - name: Download BID tenders
@@ -34,6 +36,7 @@ jobs:
           echo "$URL"
 
           HTTP_STATUS=$(curl \
+            --globoff \
             --silent \
             --show-error \
             --location \
@@ -64,7 +67,7 @@ jobs:
         run: |
           TOTAL=$(jq '.data | length' latest.tmp.json)
 
-          echo "TOTAL=$TOTAL" >> $GITHUB_ENV
+          echo "TOTAL=$TOTAL" >> "$GITHUB_ENV"
           echo "BID records retrieved: $TOTAL"
 
           if [ "$TOTAL" -eq 0 ]; then
@@ -94,7 +97,7 @@ jobs:
         run: |
           SHA256=$(sha256sum latest.json | awk '{print $1}')
 
-          echo "SHA256=$SHA256" >> $GITHUB_ENV
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
           echo "Snapshot SHA256: $SHA256"
 
       - name: Generate metadata.json
@@ -158,4 +161,4 @@ jobs:
 
           git commit -m "Update BID tenders snapshot $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
-
+```
