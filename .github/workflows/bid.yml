@@ -29,29 +29,86 @@ jobs:
 
       - name: Download BID tenders
         run: |
+          set -e
+
           URL="https://bidfa-admin.connectamericas.com/items/tenders?filter[status]=approved&limit=501&filter[date_close][_gte]=${NOW}"
+
+          MAX_RETRIES=6
+          BASE_WAIT=5
+          SUCCESS=false
 
           echo "Querying BID endpoint..."
           echo "$URL"
 
-          HTTP_STATUS=$(curl \
-            --globoff \
-            --silent \
-            --show-error \
-            --location \
-            --write-out "%{http_code}" \
-            --output latest.tmp.json \
-            "$URL")
+          for ATTEMPT in $(seq 1 $MAX_RETRIES); do
+            echo ""
+            echo "Attempt $ATTEMPT/$MAX_RETRIES"
 
-          echo "HTTP status: $HTTP_STATUS"
+            rm -f latest.tmp.json
 
-          if [ "$HTTP_STATUS" != "200" ]; then
-            echo "BID request failed"
+            HTTP_STATUS=$(curl \
+              --globoff \
+              --silent \
+              --show-error \
+              --location \
+              --connect-timeout 30 \
+              --max-time 90 \
+              --write-out "%{http_code}" \
+              --output latest.tmp.json \
+              "$URL" || true)
+
+            echo "HTTP status: $HTTP_STATUS"
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              if [ -s latest.tmp.json ]; then
+                if jq empty latest.tmp.json >/dev/null 2>&1; then
+                  if jq -e '.data | type == "array"' latest.tmp.json >/dev/null 2>&1; then
+                    echo "Valid BID JSON received"
+                    SUCCESS=true
+                    break
+                  else
+                    echo "JSON received, but .data is missing or not an array"
+                  fi
+                else
+                  echo "Response is not valid JSON"
+                  echo "Response preview:"
+                  head -c 500 latest.tmp.json || true
+                  echo ""
+                fi
+              else
+                echo "Empty response body"
+              fi
+            elif [ "$HTTP_STATUS" = "429" ] || \
+                 [ "$HTTP_STATUS" = "500" ] || \
+                 [ "$HTTP_STATUS" = "502" ] || \
+                 [ "$HTTP_STATUS" = "503" ] || \
+                 [ "$HTTP_STATUS" = "504" ]; then
+              echo "Temporary BID server/gateway error"
+            else
+              echo "Unexpected HTTP status"
+            fi
+
+            if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
+              WAIT=$((BASE_WAIT * ATTEMPT))
+              echo "Retrying in ${WAIT}s..."
+              sleep "$WAIT"
+            fi
+          done
+
+          if [ "$SUCCESS" != "true" ]; then
+            echo ""
+            echo "BID endpoint failed after $MAX_RETRIES attempts."
+            echo "No snapshot will be published."
             exit 1
           fi
 
       - name: Validate JSON
         run: |
+          if [ ! -s latest.tmp.json ]; then
+            echo "latest.tmp.json is empty"
+            exit 1
+          fi
+
           if ! jq empty latest.tmp.json >/dev/null 2>&1; then
             echo "Invalid JSON"
             exit 1
@@ -79,6 +136,7 @@ jobs:
           LIMIT=501
 
           echo "Requested limit: $LIMIT"
+          echo "Retrieved records: $TOTAL"
 
           if [ "$TOTAL" -ge "$LIMIT" ]; then
             echo "Potential truncation detected."
@@ -140,11 +198,34 @@ jobs:
             exit 1
           fi
 
+          if [ "$META_TOTAL" -ge 501 ]; then
+            echo "Potential truncation in published snapshot"
+            exit 1
+          fi
+
+          COVERAGE=$(jq -r '.coverage_complete' metadata.json)
+          STATUS=$(jq -r '.validation_status' metadata.json)
+
+          if [ "$COVERAGE" != "true" ]; then
+            echo "coverage_complete is not true"
+            exit 1
+          fi
+
+          if [ "$STATUS" != "OK" ]; then
+            echo "validation_status is not OK"
+            exit 1
+          fi
+
           echo "Validation status: OK"
 
       - name: Show metadata
         run: |
+          echo "=========================================="
+          echo "BID metadata"
+          echo "=========================================="
           cat metadata.json
+          echo ""
+          echo "=========================================="
 
       - name: Commit changes
         run: |
