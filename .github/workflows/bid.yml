@@ -2,7 +2,7 @@ name: Update BID tenders snapshot
 
 on:
   schedule:
-    - cron: "31 11 * * *"
+    - cron: "50 8 * * *"
   workflow_dispatch:
 
 permissions:
