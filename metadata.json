@@ -1,14 +1,14 @@
 {
   "source": "BID for the Americas",
   "endpoint": "https://bidfa-admin.connectamericas.com/items/tenders",
-  "extracted_at": "2026-10-15T13:39:22Z",
+  "extracted_at": "2026-10-15T13:45:38Z",
   "filters": {
     "status": "approved",
-    "date_close_gte": "2026-10-15T13:39:22Z"
+    "date_close_gte": "2026-10-15T13:45:38Z"
   },
   "total_records": 102,
   "limit_requested": 501,
   "coverage_complete": true,
   "validation_status": "OK",
-  "sha256": "64de60f6a97997ae072501bb9a057fc9bd1368b74d391641551c766ad14649e7"
+  "sha256": "43fa5fdeee085f5ece8f9a5e02645b4fc4807ae286ef2dad7c9f5746e5a3be95"
 }
